@@ -48,6 +48,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    veth_create();
     /**
      * 1、创建并启动子进程，调用该函数后，父进程将继续往后执行，也就是执行后面的waitpid
      * 2、栈是从高位向低位增长，所以这里要指向高位地址

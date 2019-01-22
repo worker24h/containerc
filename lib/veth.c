@@ -1,16 +1,21 @@
-
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>          /* See NOTES */
+#include <sys/socket.h>
+#include <linux/veth.h>
+#include <linux/if.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include "netlink.h"
 
 struct veth_request {
     struct nlmsghdr     header;
-    char                buf[1024]; /* Ä¬ÈÏ1024×ã¹» */
+    char                buf[1024]; /* ¿¿1024¿¿ */
 };
 
 static int __veth_addattr(struct rtattr *rta, int type, const void *data, int alen)
 {
-    int len = RTA_LENGTH(alen);// 4×Ö½Ú¶ÔÆë len°üÀ¨Í·²¿
+    int len = RTA_LENGTH(alen);// 4¿¿¿¿ len¿¿¿¿
     rta->rta_type = type;
     rta->rta_len = len;
     if (alen)
@@ -19,7 +24,7 @@ static int __veth_addattr(struct rtattr *rta, int type, const void *data, int al
 }
 
 /**
- * ´´½¨veth paire Ä¬ÈÏup×´Ì¬
+ * ¿¿veth paire ¿¿up¿¿
  */
 void veth_create() 
 {
@@ -28,7 +33,9 @@ void veth_create()
     char *start = NULL;
     struct rtattr *rta = NULL;
     struct rtattr *rta_linkinfo = NULL;
-    struct rtattr *rta_infodata = NULL;    
+    struct rtattr *rta_infodata = NULL;
+    struct rtattr *rta_infopeer = NULL;
+    struct ifinfomsg *ifmsg_header = NULL;
     struct veth_request req = {
         .header.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg)),
         .header.nlmsg_flags = NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL,
@@ -38,41 +45,60 @@ void veth_create()
     netlink_open(&handle, 0);
 
     start = req.buf;
-    /* netlink msg ÒªÇó4×Ö½Ú¶ÔÆë */    
-    struct ifinfomsg *ifmsg_header = (struct ifinfomsg *)start;
+    /* netlink msg ¿¿4¿¿¿¿ */    
+    ifmsg_header = (struct ifinfomsg *)start;
     ifmsg_header->ifi_family = AF_UNSPEC;
     ifmsg_header->ifi_flags = IFF_UP; // up
     ifmsg_header->ifi_change = IFF_UP; // up
     start += RTA_ALIGN(sizeof(struct ifinfomsg));
 
-    /* Ôö¼ÓÊôÐÔ: ÉèÖÃ±¾¶Ëveth ¶Ë¿ÚÃû³Æ */
-    struct rtattr *rta = (struct rtattr *)start;
-    __veth_addattr(rta, IFLA_IFNAME, "cveth0", strlen("cveth0"));
-    start += rta->rta_len;
+    /* ¿¿¿¿: ¿¿¿¿veth ¿¿¿¿ */
+    rta = (struct rtattr *)start;
+    __veth_addattr(rta, IFLA_IFNAME, "veth0", strlen("veth0")+1);
+    start += RTA_ALIGN(rta->rta_len);
 
-    /* Ôö¼ÓÊôÐÔ: ÉèÖÃlink infoÐÅÏ¢ */
+    /* ¿¿¿¿: ¿¿link info¿¿ */
     rta_linkinfo = (struct rtattr *)start;
     rta_linkinfo->rta_type = IFLA_LINKINFO;
+    start += sizeof(struct rtattr);
 
-    /* Ôö¼ÓÊôÐÔ: ÉèÖÃkind */
-    struct rtattr *rta = (struct rtattr *)start;
+    /* ¿¿¿¿: ¿¿kind */
+    rta = (struct rtattr *)start;
     __veth_addattr(rta, IFLA_INFO_KIND, "veth", strlen("veth"));
-    start += rta->rta_len;
+    start += RTA_ALIGN(rta->rta_len);
 
-    /* Ôö¼ÓÊôÐÔ: ÉèÖÃlink infoÐÅÏ¢ */
+    /* ¿¿¿¿: ¿¿info data¿¿ */
     rta_infodata = (struct rtattr *)start;
     rta_infodata->rta_type = IFLA_INFO_DATA;
+    start += sizeof(struct rtattr);
+    /* ¿¿¿¿: ¿¿info peer¿¿ */
+    rta_infopeer= (struct rtattr *)start;
+    rta_infopeer->rta_type = VETH_INFO_PEER;
+    start += sizeof(struct rtattr);
 
+    ifmsg_header = (struct ifinfomsg *)start;
+    ifmsg_header->ifi_family = AF_UNSPEC;
+    ifmsg_header->ifi_flags = IFF_UP; // up
+    ifmsg_header->ifi_change = IFF_UP; // up
+    start += RTA_ALIGN(sizeof(struct ifinfomsg));
 
+    /* ¿¿¿¿: ¿¿¿¿veth ¿¿¿¿ */
+    rta = (struct rtattr *)start;
+    __veth_addattr(rta, IFLA_IFNAME, "veth1", strlen("veth1")+1);
+    start += RTA_ALIGN(rta->rta_len);
 
-    rta_infodata->rta_rta_len = start - (char*)rta_infodata;
-
-
-    rta_linkinfo->rta_rta_len = start - (char*)rta_linkinfo;
+    rta_infopeer->rta_len = start - (char*)rta_infopeer;
     
-    netlink_send(struct netlink_handle *handle, struct nlmsghdr *buffer);
+    rta_infodata->rta_len = start - (char*)rta_infodata;
+
+    rta_linkinfo->rta_len = start - (char*)rta_linkinfo;
+
+    req.header.nlmsg_len = start - (char*)(&req);
+    
+    netlink_send(&handle, &req.header);
     
     netlink_close(&handle);
+    return;
 }
 
 void veth_up() 
@@ -89,4 +115,5 @@ void veth_network_namespace()
 {
     
 }
+
 
