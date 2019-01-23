@@ -201,7 +201,7 @@ static int __get_addr_ipv4(__u8 *ap, const char *cp)
     return 1;
 }
 
-void veth_config(const char *veth_name, char *ipv4) 
+void veth_config_ipv4(const char *veth_name, char *ipv4)
 {
     int status = 0;
     char *prefix = NULL;
@@ -238,14 +238,14 @@ void veth_config(const char *veth_name, char *ipv4)
     ifaddrmsg_header->ifa_flags = 0;    
     ifaddrmsg_header->ifa_scope = 0;
     ifaddrmsg_header->ifa_index = if_nametoindex(veth_name);
-    start += RTA_ALIGN(sizeof(struct ifaddrmsg));
-
-    //* 添加属性: 增加ifname */
+    start += RTA_ALIGN(sizeof(struct ifaddrmsg));   
+    
+    //* 添加属性: 增加if local */
     rta = (struct rtattr *)start;
     __veth_addattr(rta, IFA_LOCAL, ip, sizeof(ip));
     start += RTA_ALIGN(rta->rta_len);
 
-    /* 添加属性: 增加info kind */
+    /* 添加属性: 增加if addr */
     rta = (struct rtattr *)start;
     __veth_addattr(rta, IFA_ADDRESS, ip, sizeof(ip));
     start += RTA_ALIGN(rta->rta_len);
@@ -276,7 +276,7 @@ void veth_config(const char *veth_name, char *ipv4)
     netlink_close(&handle);
 }
 
-void veth_network_namespace(int ifindex)
+void veth_network_namespace(const char* veth_name, int child_pid)
 {
     int status = 0;
     struct netlink_handle handle;
@@ -298,11 +298,11 @@ void veth_network_namespace(int ifindex)
     /* netlink msg 消息 */    
     ifmsg_header = (struct ifinfomsg *)start;
     ifmsg_header->ifi_family = AF_UNSPEC;
-    ifmsg_header->ifi_index = ifindex;
+    ifmsg_header->ifi_index = if_nametoindex(veth_name);
     start += RTA_ALIGN(sizeof(struct ifinfomsg));
 
     /* 将veth加入到新network namesapce中 */    
-    pid = getpid();
+    pid = child_pid;
     #if 1
     rta = (struct rtattr *)start;
     __veth_addattr(rta, IFLA_NET_NS_PID, &pid, 4);
@@ -348,5 +348,118 @@ void veth_network_namespace(int ifindex)
 int veth_ifindex(const char *veth_name) {
   return if_nametoindex(veth_name);
 }
+
+void veth_newname(const char *veth_name, const char* newname) 
+{
+    int status = 0;
+    struct netlink_handle handle;
+    struct veth_request request;
+    char *start = NULL;    
+    char *response = NULL;    
+    struct rtattr *rta = NULL;
+    struct ifinfomsg *ifmsg_header = NULL;
+    struct veth_request req = {
+        .header.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg)),
+        .header.nlmsg_flags = NLM_F_REQUEST|NLM_F_ACK,
+        .header.nlmsg_type = RTM_NEWLINK
+    };
+
+    netlink_open(&handle, 0);
+
+    start = req.buf;
+    /* netlink msg 消息 */    
+    ifmsg_header = (struct ifinfomsg *)start;
+    ifmsg_header->ifi_family = AF_UNSPEC;
+    ifmsg_header->ifi_index = if_nametoindex(veth_name);
+    start += RTA_ALIGN(sizeof(struct ifinfomsg));
+    
+    //* 添加属性: 增加if name */
+    rta = (struct rtattr *)start;
+    __veth_addattr(rta, IFLA_IFNAME, newname, strlen(newname)+1);
+    start += RTA_ALIGN(rta->rta_len);
+    
+    req.header.nlmsg_len = start - (char*)(&req);
+
+    netlink_send(&handle, &req.header);
+
+    // 接收消息
+    status = netlink_recv(&handle, &response);
+    if (status > 0) {
+        struct nlmsghdr *h = (struct nlmsghdr *)response;
+        if (h->nlmsg_type == NLMSG_ERROR) {
+            struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(h);
+            int error = err->error;
+
+            if (!error) {
+                //错误为0 表示没有具体错误
+            } else {
+                errno = -error;              
+                fprintf(stderr, "ERROR: %s\n", strerror(-error));
+                netlink_close(&handle);
+                exit(1);
+            }            
+        }
+        free(response);
+    }
+    netlink_close(&handle);
+}
+
+void veth_addbr(const char *veth_name, const char* brname) 
+{
+    int status = 0;
+    int ifindex_br = 0;
+    struct netlink_handle handle;
+    struct veth_request request;
+    char *start = NULL;    
+    char *response = NULL;    
+    struct rtattr *rta = NULL;
+    struct ifinfomsg *ifmsg_header = NULL;
+    struct veth_request req = {
+        .header.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg)),
+        .header.nlmsg_flags = NLM_F_REQUEST|NLM_F_ACK,
+        .header.nlmsg_type = RTM_NEWLINK
+    };
+
+    netlink_open(&handle, 0);
+
+    start = req.buf;
+    /* netlink msg 消息 */    
+    ifmsg_header = (struct ifinfomsg *)start;
+    ifmsg_header->ifi_family = AF_UNSPEC;
+    ifmsg_header->ifi_index = if_nametoindex(veth_name);
+    start += RTA_ALIGN(sizeof(struct ifinfomsg));
+    
+    //* 添加属性: 增加if name */
+    ifindex_br = if_nametoindex(brname);
+    rta = (struct rtattr *)start;
+    __veth_addattr(rta, IFLA_MASTER, &ifindex_br, 4);
+    start += RTA_ALIGN(rta->rta_len);
+    
+    req.header.nlmsg_len = start - (char*)(&req);
+
+    netlink_send(&handle, &req.header);
+
+    // 接收消息
+    status = netlink_recv(&handle, &response);
+    if (status > 0) {
+        struct nlmsghdr *h = (struct nlmsghdr *)response;
+        if (h->nlmsg_type == NLMSG_ERROR) {
+            struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(h);
+            int error = err->error;
+
+            if (!error) {
+                //错误为0 表示没有具体错误
+            } else {
+                errno = -error;              
+                fprintf(stderr, "ERROR: %s\n", strerror(-error));
+                netlink_close(&handle);
+                exit(1);
+            }            
+        }
+        free(response);
+    }
+    netlink_close(&handle);
+}
+
 
 

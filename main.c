@@ -29,12 +29,16 @@ static void mount_root()
  */
 static int container_run(void *param)
 {
+    char ipv4[] = "192.168.23.20/24";
     struct container_run_para *cparam = (struct container_run_para*)param;
     //设置主机名
     sethostname(cparam->hostname, strlen(cparam->hostname));
     
     mount_root();
-    
+    sleep(1);
+    veth_newname("veth1", "eth0");
+    veth_up("eth0");
+    veth_config_ipv4("eth0", ipv4);
     /* 用新进程替换子进程上下文 */
     execlp("bash", "bash", (char *) NULL);
 
@@ -49,7 +53,6 @@ int main(int argc, char *argv[])
 {
     struct container_run_para  para;
     pid_t child_pid;
-    char ipv4[] = "172.17.0.100/16";
 
     if (argc < 2) {
         printf("Usage: %s <child-hostname>\n", argv[0]);
@@ -58,8 +61,9 @@ int main(int argc, char *argv[])
 
     veth_create("veth0", "veth1");
     veth_up("veth0");
-    veth_up("veth1");
-    veth_config("veth1", ipv4);
+    /* 将veth0加入到docker网桥中 */
+    veth_addbr("veth0", "docker0");
+    
     para.hostname = argv[1];
     para.ifindex = veth_ifindex("veth1");
     
@@ -70,11 +74,14 @@ int main(int argc, char *argv[])
      * 4、创建各个namespace
      */
     child_pid = clone(container_run,
-                    child_stack + sizeof(child_stack),
-                    /*CLONE_NEWUSER|*/
-                    CLONE_NEWPID|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWUTS| SIGCHLD,
-                    &para);
+                      child_stack + sizeof(child_stack),
+                      /*CLONE_NEWUSER|*/
+                      CLONE_NEWPID|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWUTS| SIGCHLD,
+                      &para);
 
+    /* 将veth添加到新namespace中 */
+    veth_network_namespace("veth1", child_pid);
+    
     NOT_OK_EXIT(child_pid, "clone");
 
     /* 等待子进程结束 */
