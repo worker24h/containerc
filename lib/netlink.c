@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -101,7 +102,76 @@ int netlink_send(struct netlink_handle *handle, struct nlmsghdr *buffer)
 }
 
 
-int netlink_recv(struct netlink_handle *handle, struct nlmsghdr *rbuffer)
+
+static int __rtnl_recvmsg(int fd, struct msghdr *msg, int flags)
 {
-    return 0;
+    int len;
+
+    do {
+        len = recvmsg(fd, msg, flags);
+    } while (len < 0 && (errno == EINTR || errno == EAGAIN));
+
+    if (len < 0) {
+        fprintf(stderr, "netlink receive error %s (%d)\n",
+            strerror(errno), errno);
+        return -errno;
+    }
+
+    if (len == 0) {
+        fprintf(stderr, "EOF on netlink\n");
+        return -ENODATA;
+    }
+
+    return len;
+}
+
+static int rtnl_recvmsg(int fd, struct msghdr *msg, char **answer)
+{
+    struct iovec *iov = msg->msg_iov;
+    char *buf;
+    int len;
+
+    iov->iov_base = NULL;
+    iov->iov_len = 0;
+
+    len = __rtnl_recvmsg(fd, msg, MSG_PEEK | MSG_TRUNC);
+    if (len < 0)
+        return len;
+
+    buf = malloc(len);
+    if (!buf) {
+        fprintf(stderr, "malloc error: not enough buffer\n");
+        return -ENOMEM;
+    }
+
+    iov->iov_base = buf;
+    iov->iov_len = len;
+
+    len = __rtnl_recvmsg(fd, msg, 0);
+    if (len < 0) {
+        free(buf);
+        return len;
+    }
+
+    if (answer)
+        *answer = buf;
+    else
+        free(buf);
+
+    return len;
+}
+
+
+int netlink_recv(struct netlink_handle *handle, char **response)
+{
+    struct iovec iov;
+    struct sockaddr_nl nladdr = { .nl_family = AF_NETLINK };
+    struct msghdr msg = {
+        .msg_name = &nladdr,
+        .msg_namelen = sizeof(nladdr),
+        .msg_iov = &iov,
+        .msg_iovlen = 1, //表示有一个iovec结构
+    };
+
+    return rtnl_recvmsg(handle->fd, &msg, response);
 }

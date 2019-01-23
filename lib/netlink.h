@@ -11,7 +11,7 @@ struct netlink_handle {
 int netlink_open(struct netlink_handle *handle, unsigned int groups);
 int netlink_close(struct netlink_handle *handle);
 int netlink_send(struct netlink_handle *handle, struct nlmsghdr *buffer);
-int netlink_recv(struct netlink_handle *handle, struct nlmsghdr *rbuffer);
+int netlink_recv(struct netlink_handle *handle, char **response);
 
 #endif
 
