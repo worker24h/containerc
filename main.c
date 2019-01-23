@@ -10,6 +10,11 @@
 
 #define NOT_OK_EXIT(code, msg); {if(code == -1){perror(msg); exit(-1);} }
 
+struct container_run_para {
+    char *hostname;
+    int  ifindex;
+};
+
 /**
  * 挂载点修改
  */
@@ -22,13 +27,14 @@ static void mount_root()
 /**
  * 容器启动 -- 实际为子进程启动
  */
-static int container_run(void *hostname)
+static int container_run(void *param)
 {
+    struct container_run_para *cparam = (struct container_run_para*)param;
     //设置主机名
-    sethostname(hostname, strlen(hostname));
-
+    sethostname(cparam->hostname, strlen(cparam->hostname));
+    
     mount_root();
-
+    
     /* 用新进程替换子进程上下文 */
     execlp("bash", "bash", (char *) NULL);
 
@@ -41,15 +47,22 @@ static char child_stack[1024*1024]; //设置子进程的栈空间为1M
 
 int main(int argc, char *argv[])
 {
+    struct container_run_para  para;
     pid_t child_pid;
+    char ipv4[] = "172.17.0.100/16";
 
     if (argc < 2) {
         printf("Usage: %s <child-hostname>\n", argv[0]);
         return -1;
     }
 
-    veth_create();
-
+    veth_create("veth0", "veth1");
+    veth_up("veth0");
+    veth_up("veth1");
+    veth_config("veth1", ipv4);
+    para.hostname = argv[1];
+    para.ifindex = veth_ifindex("veth1");
+    
     /**
      * 1、创建并启动子进程，调用该函数后，父进程将继续往后执行，也就是执行后面的waitpid
      * 2、栈是从高位向低位增长，所以这里要指向高位地址
@@ -60,7 +73,7 @@ int main(int argc, char *argv[])
                     child_stack + sizeof(child_stack),
                     /*CLONE_NEWUSER|*/
                     CLONE_NEWPID|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWUTS| SIGCHLD,
-                    argv[1]);
+                    &para);
 
     NOT_OK_EXIT(child_pid, "clone");
 
