@@ -15,14 +15,69 @@ struct container_run_para {
     int  ifindex;
 };
 
+char* const container_args[] = {
+    "/bin/sh",
+    "-l",
+    NULL
+};
+
+static char container_stack[1024*1024]; //靠靠靠靠靠1M
+
 /**
- * 挂载点修改
+ * 设置挂载点
  */
 static void mount_root() 
 {
+#if 1
     mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
     mount("proc", "/proc", "proc", 0, NULL);
+#else
+    //remount "/proc" to make sure the "top" and "ps" show container's information
+    if (mount("proc", "containerc_roots/rootfs/proc", "proc", 0, NULL) !=0 ) {
+        perror("proc");
+    }
+    if (mount("sysfs", "containerc_roots/rootfs/sys", "sysfs", 0, NULL)!=0) {
+        perror("sys");
+    }
+    if (mount("none", "containerc_roots/rootfs/tmp", "tmpfs", 0, NULL)!=0) {
+        perror("tmp");
+    }
+
+    if (mount("udev", "containerc_roots/rootfs/dev", "devtmpfs", 0, NULL)!=0) {
+        perror("dev");
+    }
+    if (mount("devpts", "containerc_roots/rootfs/dev/pts", "devpts", 0, NULL)!=0) {
+        perror("dev/pts");
+    }
+    
+    if (mount("shm", "containerc_roots/rootfs/dev/shm", "tmpfs", 0, NULL)!=0) {
+        perror("dev/shm");
+    }
+   
+    if (mount("tmpfs", "containerc_roots/rootfs/run", "tmpfs", 0, NULL)!=0) {
+        perror("run");
+    }
+    /* 
+     * 模仿Docker的从外向容器里mount相关的配置文件 
+     * 你可以查看：/var/lib/docker/containers/<container_id>/目录，
+     * 你会看到docker的这些文件的。
+     */
+    if (mount("./containerc_roots/conf/hosts", "./containerc_roots/rootfs/etc/hosts", "none", MS_BIND, NULL)!=0 ||
+        mount("./containerc_roots/conf/hostname", "./containerc_roots/rootfs/etc/hostname", "none", MS_BIND, NULL)!=0 ||
+        mount("./containerc_roots/conf/resolv.conf", "./containerc_roots/rootfs/etc/resolv.conf", "none", MS_BIND, NULL)!=0 ) {
+        perror("conf 000");
+    }
+    /* 模仿docker run命令中的 -v, --volume=[] 参数干的事 */
+    if (mount("/tmp/t1", "./containerc_roots/rootfs/mnt", "none", MS_BIND, NULL)!=0) {
+        perror("mnt");
+    }
+    /* chroot 隔离目录 */
+    if (chdir("./containerc_roots/rootfs") != 0 || chroot("./") != 0){
+        perror("chdir/chroot");
+    }
+#endif 
 }
+
 
 /**
  * 容器启动 -- 实际为子进程启动
@@ -40,14 +95,12 @@ static int container_run(void *param)
     veth_up("eth0");
     veth_config_ipv4("eth0", ipv4);
     /* 用新进程替换子进程上下文 */
-    execlp("bash", "bash", (char *) NULL);
+    execv(container_args[0], container_args);
 
-    //从这里开始的代码将不会被执行到，因为当前子进程已经被上面的bash替换掉了
+     //从这里开始的代码将不会被执行到，因为当前子进程已经被上面的sh替换掉了
 
     return 0;
 }
-
-static char child_stack[1024*1024]; //设置子进程的栈空间为1M
 
 int main(int argc, char *argv[])
 {
@@ -74,7 +127,7 @@ int main(int argc, char *argv[])
      * 4、创建各个namespace
      */
     child_pid = clone(container_run,
-                      child_stack + sizeof(child_stack),
+                      container_stack + sizeof(container_stack),
                       /*CLONE_NEWUSER|*/
                       CLONE_NEWPID|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWUTS| SIGCHLD,
                       &para);
@@ -89,4 +142,5 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
 
