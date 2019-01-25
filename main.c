@@ -31,7 +31,8 @@ static void mount_root()
 #if 1
     mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
     mount("proc", "/proc", "proc", 0, NULL);
-#else
+#else    
+    mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
     //remount "/proc" to make sure the "top" and "ps" show container's information
     if (mount("proc", "containerc_roots/rootfs/proc", "proc", 0, NULL) !=0 ) {
         perror("proc");
