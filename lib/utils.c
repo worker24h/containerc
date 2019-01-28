@@ -10,9 +10,9 @@
 #include <arpa/inet.h>
 #include "utils.h"
 
-static int get_prefix(int mask)
+static int get_prefix(uint32_t mask)
 {
-    int i = 0, cnt;
+    int i = 0, cnt = 0;
     for (i = 0; i < 32; i++)
     {
         if ((mask<<i) & 0x80000000)
@@ -26,7 +26,7 @@ static int get_prefix(int mask)
 struct bridge_ipinfo get_brip(const char *br)
 {
     struct bridge_ipinfo brinfo;
-    int fd, intrface, retn = 0;
+    int fd, interfaces, retn = 0;
     struct ifreq buf[INET_ADDRSTRLEN];
     struct ifconf ifc;
     char ip[32], mask[32];
@@ -38,27 +38,27 @@ struct bridge_ipinfo get_brip(const char *br)
         ifc.ifc_buf = (caddr_t)buf;
         if (!ioctl(fd, SIOCGIFCONF, (char *)&ifc))
         {
-            intrface = ifc.ifc_len/sizeof(struct ifreq);
-            while (intrface-- > 0)
+            interfaces = ifc.ifc_len/sizeof(struct ifreq);
+            while (interfaces-- > 0)
             {                
-                if (strcmp(buf[intrface].ifr_name, br)) 
+                if (strcmp(buf[interfaces].ifr_name, br)) 
                 {
                     continue;
                 }
                 
-                if (!(ioctl(fd, SIOCGIFADDR, (char *)&buf[intrface])))
+                if (!(ioctl(fd, SIOCGIFADDR, (char *)&buf[interfaces])))
                 {
-                    uip = ((struct sockaddr_in*)&(buf[intrface].ifr_addr))->sin_addr.s_addr;
-                    brinfo.ip = ntohl(uip);
-                    inet_ntop(AF_INET, &uip, ip, (socklen_t )sizeof(ip));
-                    if (ioctl(fd, SIOCGIFNETMASK, &buf[intrface]) < 0){  
+                    uip = ((struct sockaddr_in*)&(buf[interfaces].ifr_addr))->sin_addr.s_addr;
+                    brinfo.ip = ntohl(uip);                    
+                    if (ioctl(fd, SIOCGIFNETMASK, &buf[interfaces]) < 0){  
                         fprintf(stderr, "Error: %d, cannot get mask of %s\n", errno, br);
                         exit(1);
                     }  
                     else{  
-                        umask = ((struct sockaddr_in*)&(buf[intrface].ifr_netmask))->sin_addr.s_addr;
+                        umask = ((struct sockaddr_in*)&(buf[interfaces].ifr_netmask))->sin_addr.s_addr;
                         brinfo.prefix = get_prefix(ntohl(umask));
-                    }                                     
+                    }
+                    break;
                 }
             }
         }
@@ -67,12 +67,12 @@ struct bridge_ipinfo get_brip(const char *br)
     return brinfo;
 }
 
-void new_containerip(char *ipaddr)
+void new_containerip(char *ipaddr, int len)
 {
     int  ip;//ÍøÂçÐò
     struct bridge_ipinfo docker0 = get_brip("docker0");
     ip = htonl(docker0.ip + 99);
-    inet_ntop(AF_INET, &ip, ipaddr, (socklen_t )sizeof(ipaddr));
+    inet_ntop(AF_INET, &ip, ipaddr, len);
     sprintf(ipaddr+strlen(ipaddr), "/%d", docker0.prefix);    
     return;
 }

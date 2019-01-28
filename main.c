@@ -12,6 +12,7 @@
 #define NOT_OK_EXIT(code, msg); {if(code == -1){perror(msg); exit(-1);} }
 
 struct container_run_para {
+    char *container_ip;
     char *hostname;
     int  ifindex;
 };
@@ -97,10 +98,8 @@ static void setnewenv()
  * 容器启动 -- 实际为子进程启动
  */
 static int container_run(void *param)
-{
-    char ipv4[32];
-    struct container_run_para *cparam = (struct container_run_para*)param;
-    
+{    
+    struct container_run_para *cparam = (struct container_run_para*)param;    
     //设置主机名
     sethostname(cparam->hostname, strlen(cparam->hostname));
 
@@ -109,11 +108,10 @@ static int container_run(void *param)
     mount_root();
     sleep(1);
 
-    //修改网卡名称并设置ip
-    new_containerip(ipv4);
+
     veth_newname("veth1", "eth0");
     veth_up("eth0");        
-    veth_config_ipv4("eth0", ipv4);
+    veth_config_ipv4("eth0", cparam->container_ip);
     /* 用新进程替换子进程上下文 */
     execv(container_args[0], container_args);
 
@@ -121,11 +119,12 @@ static int container_run(void *param)
 
     return 0;
 }
-int 
+ 
 int main(int argc, char *argv[])
 {
     struct container_run_para  para;
     pid_t child_pid;
+    char ipv4[32] = {0};
 
     if (argc < 2) {
         printf("Usage: %s <child-hostname>\n", argv[0]);
@@ -138,8 +137,13 @@ int main(int argc, char *argv[])
     /* 将veth0加入到docker网桥中 */
     veth_addbr("veth0", "docker0");
     
+    
+    //获取container ip
+    new_containerip(ipv4, sizeof(ipv4));
+    
     para.hostname = argv[1];
     para.ifindex = veth_ifindex("veth1");
+    para.container_ip = ipv4;
     
     /**
      * 1、创建并启动子进程，调用该函数后，父进程将继续往后执行，也就是执行后面的waitpid

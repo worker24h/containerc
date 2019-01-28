@@ -7,7 +7,7 @@ struct bridge_ipinfo {
     uint32_t prefix; //×ÓÍøÑÚÂëÇ°×º 16 24µÈ
 };
 struct bridge_ipinfo get_brip(const char *br);
-void new_containerip(char *ip);
+void new_containerip(char *ipaddr, int len);
 
 #endif
 
