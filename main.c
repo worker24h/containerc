@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/mount.h>
 #include "lib/veth.h"
+#include "lib/utils.h"
 
 #define NOT_OK_EXIT(code, msg); {if(code == -1){perror(msg); exit(-1);} }
 
@@ -21,14 +22,14 @@ char* const container_args[] = {
     NULL
 };
 
-static char container_stack[1024*1024]; //靠靠靠靠靠1M
+static char container_stack[1024*1024]; //子进程栈空间大小 1M
 
 /**
  * 设置挂载点
  */
 static void mount_root() 
 {
-#if 1
+#if 0
     mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
     mount("proc", "/proc", "proc", 0, NULL);
 #else    
@@ -79,21 +80,39 @@ static void mount_root()
 #endif 
 }
 
+static void setnewenv() 
+{
+    char *penv = getenv("PATH");
+    if (NULL == penv) {
+        setenv("PATH", "/bin/", 1);
+    } else {
+        char *new_path = malloc(sizeof(char)*(strlen(penv)+32));
+        sprintf(new_path, "%s:%s", penv, "/bin/");
+        setenv("PATH", new_path, 1);
+        free(new_path);
+    }
+}
 
 /**
  * 容器启动 -- 实际为子进程启动
  */
 static int container_run(void *param)
 {
-    char ipv4[] = "192.168.23.20/24";
+    char ipv4[32];
     struct container_run_para *cparam = (struct container_run_para*)param;
+    
     //设置主机名
     sethostname(cparam->hostname, strlen(cparam->hostname));
-    
+
+    //设置环境变量
+    setnewenv();
     mount_root();
     sleep(1);
+
+    //修改网卡名称并设置ip
+    new_containerip(ipv4);
     veth_newname("veth1", "eth0");
-    veth_up("eth0");
+    veth_up("eth0");        
     veth_config_ipv4("eth0", ipv4);
     /* 用新进程替换子进程上下文 */
     execv(container_args[0], container_args);
@@ -102,7 +121,7 @@ static int container_run(void *param)
 
     return 0;
 }
-
+int 
 int main(int argc, char *argv[])
 {
     struct container_run_para  para;
@@ -112,7 +131,8 @@ int main(int argc, char *argv[])
         printf("Usage: %s <child-hostname>\n", argv[0]);
         return -1;
     }
-
+    //获取docker0网卡ip地址
+    
     veth_create("veth0", "veth1");
     veth_up("veth0");
     /* 将veth0加入到docker网桥中 */
