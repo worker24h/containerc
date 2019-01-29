@@ -30,10 +30,6 @@ static char container_stack[1024*1024]; //子进程栈空间大小 1M
  */
 static void mount_root() 
 {
-#if 0
-    mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
-    mount("proc", "/proc", "proc", 0, NULL);
-#else    
     mount("none", "/", NULL, MS_REC|MS_PRIVATE, NULL);
     //remount "/proc" to make sure the "top" and "ps" show container's information
     if (mount("proc", "containerc_roots/rootfs/proc", "proc", 0, NULL) !=0 ) {
@@ -78,7 +74,6 @@ static void mount_root()
     if (chdir("./containerc_roots/rootfs") != 0 || chroot("./") != 0){
         perror("chdir/chroot");
     }
-#endif 
 }
 
 static void setnewenv() 
